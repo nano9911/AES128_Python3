@@ -3,10 +3,12 @@
 *   Created at: 19/12/2020
 *   Tile: AES implementation in python
 '''
+
 try:
     import Queue
 except ImportError:
     import queue as Queue
+
 from random import seed, getrandbits
 import sys
 import threading
@@ -15,11 +17,11 @@ import AES_key_sched as aes_key
 import AES_encrypt as aes_enc
 import AES_decrypt as aes_dec
 
-BUFF_SIZE = 100
+BUFF_SIZE = 1024
 q1 = Queue.Queue(BUFF_SIZE)
 q2 = Queue.Queue(BUFF_SIZE)
-exit_flag = 0
-
+q1lock = threading.Lock()
+q2lock = threading.Lock()
 
 def get_file_size(fn) :
     fp = open(fn, "rb")
@@ -46,7 +48,6 @@ def print_bytes(arg) :
 
 IV = bytearray(16)
 
-
 def gen_random_iv() :
     global IV
     seed()
@@ -63,8 +64,8 @@ def get_iv(fn) :
 
 class read_thread (threading.Thread):
     def __init__(self, threadID, name, arg1, arg2, arg3):
-#        super(read_thread, self).__init__()
-        threading.Thread.__init__(self)
+        super(read_thread, self).__init__()
+#        threading.Thread.__init__(self)
         self.threadID = threadID
         self.name = name
         self.fn = arg1
@@ -72,102 +73,106 @@ class read_thread (threading.Thread):
         self.extra = arg3
 
     def run(self) :
-        print("Starting " + self.name)
-
         fp = open(self.fn, "rb")
         for i in range(self.size) :
-            if not q1.full() :
-                if exit_flag :
-                    print("read_thread stopped, exit_flag = 1")
-                    break
-                state = bytearray(fp.read(16))
-                if i == (self.size-1) :
-                    for i in range(self.extra, 16) :
-                        state.append(0x00)
-                q1.put(state)
+            state = bytearray(fp.read(16))
+            if i == (self.size-1) :
+                for i in range(self.extra, 16) :
+                    state.append(0x00)
+
+            while q1.full() :
+                sleep(0.005)
+
+            q1lock.acquire()
+            q1.put(state)
+            q1lock.release()
+
         fp.close()
-
-        print("Exiting " + self.name)
         return
-
 
 class operate_thread(threading.Thread) :
     def __init__(self, threadID, name, arg1) :
-#        super(write_thread, self).__init__()
-        threading.Thread.__init__(self)
+        super(operate_thread, self).__init__()
+#        threading.Thread.__init__(self)
         self.threadID = threadID
         self.name = name
         self.size = arg1
         return
 
     def run(self) :
-        print("Starting " + self.name)
         if self.name == "ecb_encrypt" :
-#            ecb.encrypt(self.size)
             for i in range(self.size) :
-                if not q1.empty() :
-                    if exit_flag :
-                        print("write_thread stopped, exit_flag = 1")
-                        break
+                while q1.empty() :
+                    sleep(0.005)
 
+                q1lock.acquire()
                 state = bytearray(q1.get())
+                q1lock.release()
+
                 aes_enc.encrypt_one_state(state, aes_key.key, aes_key.round_key)
 
-                if not q2.full() :
-                    if exit_flag :
-                        print("read_thread stopped, exit_flag = 1")
-                        break
-                    q2.put(state)
+                while q2.full() :
+                    sleep(0.005)
+
+                q2lock.acquire()
+                q2.put(state)
+                q2lock.release()
+
 ##############################################################
         elif self.name == "ecb_decrypt" :
-#            ecb.decrypt(self.size)
             for i in range(self.size) :
-                if not q1.empty() :
-                    if exit_flag :
-                        print("write_thread stopped, exit_flag = 1")
-                        break
+                while q1.empty() :
+                    sleep(0.005)
 
-                    state = bytearray(q1.get())
-                    aes_dec.decrypt_one_state(state, aes_key.key, aes_key.round_key)
+                q1lock.acquire()
+                state = bytearray(q1.get())
+                q1lock.release()
 
-                    if not q2.full() :
-                        if exit_flag :
-                            print("read_thread stopped, exit_flag = 1")
-                            break
-                        q2.put(state)
+                aes_dec.decrypt_one_state(state, aes_key.key, aes_key.round_key)
+
+                while q2.full() :
+                    sleep(0.005)
+
+                q2lock.acquire()
+                q2.put(state)
+                q2lock.release()
+
 ##############################################################
         elif self.name == "ctr" :
-#            ctr.operate(self.size)
             for i in range(self.size) :
-                if not q1.empty() :
-                    if exit_flag :
-                        print("write_thread stopped, exit_flag = 1")
-                        break
+                while q1.empty() :
+                    sleep(0.005)
 
-                    state = bytearray(q1.get())
-                    aes_enc.encrypt_one_state(IV, aes_key.key, aes_key.round_key)
-                    for e in range(16) :    state[e] ^= IV[e]
-                    for e in range(15, -1, -1) :
-                        if (IV[e]+1) > 0xff :
-                            IV[e] = 0x00
-                            continue
-                        IV[e] += 1
-                        break
+                q1lock.acquire()
+                state = bytearray(q1.get())
+                q1lock.release()
 
-                    if not q2.full() :
-                        if exit_flag :
-                            print("read_thread stopped, exit_flag = 1")
-                            break
-                        q2.put(state)
+                aes_enc.encrypt_one_state(IV, aes_key.key, aes_key.round_key)
+            
+                for e in range(16) :
+                    state[e] ^= IV[e]
 
-        print("Exiting " + self.name)
+                for e in range(15, -1, -1) :
+                    if (IV[e]+1) > 0xff :
+                        IV[e] = 0x00
+                        continue
+                    IV[e] += 1
+                    break
+
+                while q2.full() :
+                    sleep(0.005)
+
+                q2lock.acquire()
+                q2.put(state)
+                q2lock.release()
+
         return
 
 
 class write_thread (threading.Thread) :
     def __init__(self, threadID, name, arg1, arg2) :
-#        super(write_thread, self).__init__()
-        threading.Thread.__init__(self)
+        super(write_thread, self).__init__()
+#        threading.Thread.__init__(self)
         self.threadID = threadID
         self.name = name
         self.fn = arg1
@@ -175,22 +180,28 @@ class write_thread (threading.Thread) :
         return
 
     def run(self) :
-        print("Starting " + self.name)
+        print("\t\t\t", end = "")
 
         fp = open(self.fn, "wb")
         for i in range(self.size) :
-            if not q2.empty() :
-                if exit_flag :
-                    print("write_thread stopped, exit_flag = 1")
-                    break
-                state = bytearray(q2.get())
-                if i == (self.size-1) :
-                    while (not state[len(state)-1]) & (len(state)>0) :
-                        state.pop()
-                fp.write(state)
-        fp.close()
+            while q2.empty() :
+                sleep(0.005)
 
-        print("Exiting " + self.name)
+            q2lock.acquire()
+            state = bytearray(q2.get())
+            q2lock.release()
+
+            if i == ((self.size)-1) :
+                while (not state[len(state)-1]) & (len(state)>0) :
+                    state.pop()
+
+            fp.write(state)
+            print("\b"*11, end = "")
+            print("%010d" % i, end = " ")
+
+        fp.close()
+        print("Blocks\n\n\tFinished")
+        return
 
 
 def main(argv) :
@@ -227,7 +238,7 @@ def main(argv) :
         operation = "ecb_decrypt"
 
     elif "-ctr" in argv :
-        ivfn = 0
+        IVfn = 0
         if "-iv" in argv :  
             IVfn = argv[argv.index("-iv")+1]
             get_iv(IVfn)
@@ -238,17 +249,16 @@ def main(argv) :
         operation = "ctr"
 
     if operation != 0 :
-        read = read_thread(1,"read", infn, size, extra)
-        read.start()
-        sleep(0.05)
+        read = read_thread(1, "read", infn, size, extra)
         operate = operate_thread(2, operation, size)
-        operate.start()
-        sleep(0.05)
         write = write_thread(3, "write", outfn, size)
+
+        read.start()
+        operate.start()
         write.start()
-    
-        read.join()
-        operate.join()
+
+#        read.join()
+#        operate.join()
         write.join()
 
     else :
