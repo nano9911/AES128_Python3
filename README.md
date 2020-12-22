@@ -22,16 +22,21 @@ write_thread [Consumer -> q2] --> Get data from q2 as states(16-Bytes), write it
 Command Line Arguments:
 
 Mode:
+
 "-ecb" --> ECB Mode   ||    "-ctr" --> CTR Mode
 
+
 Operation:
+
 "-e" --> Encrypt    ||    "-d" --> Decrypt
 
-"-o" --> output file name   ||    output file name = input file name + (".aes" if encrypted || ".decrypted" if decrypted)
+"-o" --> output file name   ||    output file name = input file name + ".output"
 
 "-k" --> read key value from the following file, will be read as bytesarray   ||    key will be generated randomly
 
+
 In case of CTR Mode :
+
 "-iv" --> read IV from the following key    ||    IV will be generated randomly
 
 
@@ -39,5 +44,11 @@ In case of CTR Mode :
 
 Example:
 
-python3 AES.py plain.txt -ecb -k key.txt -o output encrypted
+[ECB-Mode Encrypted | Read Key from "key.txt" | Name the output file "output.encrypted"]
+
+python3 AES.py plain.txt -ecb -k key.txt -o output.encrypted -enc
+
+
+[CTR-Mode | Generate Random Key | Read IV frim "IV.txt" | Name output file by default "cipher.aes.output"]
+
 python3 AES.py cihper.aes -ctr -iv IV.txt
